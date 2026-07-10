@@ -1,0 +1,31 @@
+# Raw data - large files, not tracked (document how to obtain in README instead)
+data/raw/*
+!data/raw/.gitkeep
+
+# Large processed intermediate files
+data/processed/*.rds
+data/processed/*.RData
+data/processed/*.idat
+data/processed/*.idat.gz
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
