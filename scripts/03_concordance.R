@@ -24,6 +24,16 @@
 #   WITHIN the resulting CpG-gene pair set. A candidate-gene mode (cfg$candidate_*)
 #   supports a properly-powered, a-priori-restricted test in parallel.
 #
+# DESIGN NOTE -- eQTM p-value is a GATE, not an FDR-tested hypothesis (deliberate).
+#   The BH-FDR (cfg$concordance_fdr) is applied to the two DIET signals per pair
+#   (pmax of diet->meth and diet->expr p). The local methylation<->expression link
+#   (eqtm_p) is used only as a hard filter on which pairs qualify as concordant
+#   (cfg$eqtm_p_max). It is intentionally kept OUT of the FDR set: it is a
+#   supporting/mechanistic condition, not one of the diet-association hypotheses we
+#   are counting. Folding it in would conflate "diet moves this" with "methylation
+#   locally tracks expression" and distort the correction. This is a choice, not an
+#   oversight -- revisit if a reviewer wants a single combined error rate.
+#
 # Inputs  (from scripts 01 & 02):
 #   data/processed/m_values.rds, pheno_methylation.rds   (has 6 cell-type props)
 #   data/processed/grSet_normalized_filtered.rds         (for CpG annotation)
@@ -196,20 +206,29 @@ log_msg("DE done for %d genes.", nrow(de))
 cov_mm <- d_expr$mm[, setdiff(colnames(d_expr$mm), c("(Intercept)", d_expr$coef)),
                     drop = FALSE]
 samp   <- rownames(d_expr$mm)
+na_eqtm <- c(slope = NA_real_, p = NA_real_)
 eqtm_slope <- function(cpg, gene) {
-  y <- as.numeric(expr_gene[gene, samp])
-  x <- as.numeric(mval[cpg, samp])
-  f <- lm.fit(cbind(1, x, cov_mm), y)          # coef 2 = methylation slope
-  b <- f$coefficients[2]
-  # p-value for the methylation slope
-  rss <- sum(f$residuals^2); df <- length(y) - ncol(cbind(1, x, cov_mm))
-  se  <- sqrt(diag(chol2inv(f$qr$qr[1:f$rank, 1:f$rank, drop = FALSE])) * rss / df)[2]
-  c(slope = b, p = 2 * pt(-abs(b / se), df))
+  tryCatch({
+    y <- as.numeric(expr_gene[gene, samp])
+    x <- as.numeric(mval[cpg, samp])
+    X <- cbind(1, x, cov_mm)
+    # not estimable: missing values, no methylation variance, or rank-deficient
+    if (anyNA(y) || anyNA(x) || stats::sd(x) == 0) return(na_eqtm)
+    f <- lm.fit(X, y)                            # coef 2 = methylation slope
+    if (f$rank < ncol(X)) return(na_eqtm)
+    b   <- f$coefficients[2]
+    rss <- sum(f$residuals^2); df <- length(y) - f$rank
+    se  <- sqrt(diag(chol2inv(f$qr$qr[1:f$rank, 1:f$rank, drop = FALSE])) * rss / df)[2]
+    c(slope = b, p = 2 * pt(-abs(b / se), df))
+  }, error = function(e) na_eqtm)
 }
 log_msg("Computing eQTM for %d pairs...", nrow(pairs))
 eq <- t(mapply(eqtm_slope, pairs$CpG, pairs$gene))
 pairs$eqtm_slope <- eq[, "slope"]
 pairs$eqtm_p     <- eq[, "p"]
+n_bad <- sum(is.na(pairs$eqtm_p))
+if (n_bad) log_msg("  %d/%d pairs non-estimable (eQTM = NA), treated as non-concordant.",
+                   n_bad, nrow(pairs))
 
 # attach diet effects
 mi <- match(pairs$CpG, ewas$CpG)
@@ -223,6 +242,7 @@ pairs$concordant <- with(pairs,
   sign(diet_expr_b) == predicted_expr_sign &
   eqtm_p     <= cfg$eqtm_p_max &
   diet_meth_p <= cfg$ewas_p_discovery)
+pairs$concordant[is.na(pairs$concordant)] <- FALSE   # non-estimable eQTM -> not concordant
 
 # BH-FDR within the pair set, on the weakest of the two diet signals per pair
 pairs$pair_p   <- pmax(pairs$diet_meth_p, pairs$diet_expr_p)

@@ -17,13 +17,18 @@ dataset/question combination that does not appear to be previously published
 |---|---|---|---|
 | `SampleSheet_V2.csv` | Methylation sample sheet + phenotypes | 98 | Illumina MethylationEPIC (~850K), blood |
 | `Gx_sample_info-21-06-15_v3.txt` | Expression sample metadata | 1,883 | Illumina HumanHT-12 v4, blood |
+| `Gx_probe_info-21-06-15_v3.txt` | Expression probe annotation + QC flags (48,106 probes × 42 cols) | — | — |
 | `Gx_DataDictionary-21-06-15_v3.xlsx` | Column docs for sample_info + probe annotation | — | — |
+| `Clinical…Klemp…2022.pdf` | Source paper (candidate-gene provenance, see below) | — | — |
 
 - **Cross-assay linkage:** methylation `Synonym` column == expression `sampleID`.
   Verified overlap = **48 subjects** with both assays. Paired cohort is 25F / 23M
   (so `Sex` is a real covariate). `DietScore` range 3–24, continuous.
 - Preprocessing relabels expression columns from `sampleID` → methylation
   `Sample_Name` so both assays share one sample key downstream.
+- **Tracked curated input:** `data/raw/annotation/candidate_genes.txt` is the one
+  file under `data/raw/` that IS git-tracked (a `.gitignore` exception) — it's a
+  derived analysis input, not bulk raw data.
 
 ## Known data quirks
 - **Duplicate `HLS` column** in `SampleSheet_V2.csv`: appears twice — categorical
@@ -33,10 +38,21 @@ dataset/question combination that does not appear to be previously published
 - **IDAT files not yet in repo.** minfi needs the raw `*_Grn.idat`/`*_Red.idat`
   pairs; they are gitignored and expected in **`data/raw/idat/`**. Script 01 fails
   fast with a clear message if absent.
-- **Expression values matrix not yet downloaded.** Data dictionary implies it ships
-  already normalized/batch-corrected/imputed (with per-probe QC flags), so script 02
-  loads a processed matrix + applies provider flags rather than doing bead-level
-  normalization. Unknown filenames/columns are marked `# CONFIRM` in `02`'s config.
+- **Expression values matrix not yet downloaded.** The probe *annotation*
+  (`Gx_probe_info`) and *sample* metadata ARE in hand, but the per-sample values
+  matrix is not. Data dictionary implies it ships already normalized/batch-
+  corrected/imputed (per-probe QC flags), so script 02 loads a processed matrix +
+  applies provider flags rather than doing bead-level normalization. `02`'s
+  `probe_annot` path is confirmed to `Gx_probe_info`; the `expr_matrix` filename/
+  columns are still marked `# CONFIRM`.
+
+## Current status & blockers (2026-07-10)
+Pipeline is **fully scaffolded and pushed** (`01`→`03`, install script, candidate
+list, docs) but **nothing has been run** — `data/processed/` and `results/` are
+empty. **Two missing raw files block everything downstream:** the methylation
+**IDATs** (0/98 present) and the **expression values matrix**. Full plain-language
+status lives in [`docs/execution_plan.md`](docs/execution_plan.md); this file is the
+technical brief.
 
 ## Known limitations (stated upfront, not compromises)
 - **n=48 paired is underpowered** for genome-wide FDR across ~850K probes.
@@ -60,9 +76,31 @@ dataset/question combination that does not appear to be previously published
    `sign(b_diet_expr) == sign(b_diet_meth × b_eqtm)`. limma moderated stats; covariates
    Age+Sex+BMI, cell types adjust the methylation model (one dropped as reference to
    avoid collinearity — proportions sum to 1).
-4. **Candidate-gene follow-up** — ~20–50 a-priori inflammation/metabolic genes
-   (`data/raw/annotation/candidate_genes.txt`), tagged in `03` for a powered arm.
+4. **Candidate-gene follow-up** — `data/raw/annotation/candidate_genes.txt`
+   (25 genes), tagged in `03` for a powered arm. See "Candidate gene sourcing".
 5. **Pathway enrichment** — clusterProfiler on concordant genes (not yet scripted).
+
+Note: the genome-wide EWAS lives **inside `03_concordance.R`** (its stage 1), not a
+separate script — a deliberate decision (an earlier plan draft split them).
+
+## Candidate gene sourcing & provenance
+- **Sourced from the real paper, not memory.** The 25 genes were extracted directly
+  from the Klemp et al. 2022 PDF (`data/raw/`) — Table 2 (top DMPs, p.6) and Table 3
+  (top DMRs, p.10), read via rendered page images because the tables are rotated.
+  Every CpG ID was cross-checked against machine-extracted text. Tooling: `pymupdf`
+  (installed to the user's Python 3.13; poppler/pdftotext were unavailable).
+- **Smoking-confound exclusion.** The 4 canonical smoking-methylation markers in
+  those tables (`AHRR`, `F2RL3`, `GFI1`, `RARA`) were **deliberately excluded** — the
+  paper flags them as its strongest effects (p<1e-11) and they are smoking- not
+  diet-driven; the models already adjust for `Smoking_score`. This is the
+  "metabolic-focused subset" (user's choice).
+- **Caveat carried in-file:** these are Klemp's lifestyle-**composite** (healthy vs
+  unhealthy) hits, used as an a-priori prior — NOT a diet-specific gene set. The
+  candidate arm is hypothesis-generating.
+- **Verified testable:** all 25 have ≥1 probe in `Gx_probe_info` (`symbol_INGENUITY`).
+  Legacy alias `KIAA1026` (Table 2) was resolved to current symbol **`KAZN`** via the
+  `synonyms_INGENUITY` field — using the legacy symbol would have silently dropped it.
+- `03` parses the list stripping `#` comments (full-line and inline).
 
 ## Tech stack
 - **R** for genomics statistics: `minfi`, `ChAMP`, `limma`, `DMRcate` (DMR calling),
