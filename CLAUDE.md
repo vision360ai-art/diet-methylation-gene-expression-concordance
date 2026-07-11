@@ -73,8 +73,20 @@ correct — only the values-matrix filename/orientation remain unverifiable unti
 lands. Full plain-language status lives in
 [`docs/execution_plan.md`](docs/execution_plan.md); this file is the technical brief.
 
+**Exploratory QC** (`explore_methylation_structure.R`, raw vs. cell-corrected): raw
+methylation PC1 is almost entirely blood cell composition (PC1↔neutrophil r=−0.95);
+residualizing on the 6 proportions removes it and **age** emerges as the next axis
+(PC2↔Age r=−0.59). DietScore shows no global PCA/clustering structure before or after
+correction — expected, and the motivation for the supervised, covariate-adjusted EWAS.
+Figures: `results/figures/pca_{raw,cellcorr}_*`, `hclust_{raw,cellcorr}_*`.
+
+**Next session, in order:** (1) wire `maxprobes` cross-reactive filtering into `01`
+(the one filter still self-skipping); (2) obtain the expression values matrix → set
+`02`'s three `# CONFIRM` items → run `02` → `03` for the full concordance analysis.
+
 ## Known limitations (stated upfront, not compromises)
-- **n=48 paired is underpowered** for genome-wide FDR across ~850K probes.
+- **n=48 paired is underpowered** for genome-wide FDR across ~850K probes (and only
+  **36** are currently usable — 12 IDAT pairs still missing; the EWAS ran on 36).
   Handled by treating EWAS as *discovery* (nominal-p + top-N) and controlling FDR
   *within* the CpG–gene pair set, plus a candidate-gene arm.
 - **Both platforms are arrays** (EPIC + HT-12v4), not WGBS/RRBS or RNA-seq. This is
@@ -85,13 +97,22 @@ lands. Full plain-language status lives in
 ## Analysis plan / pipeline (`scripts/`, numbered by order)
 1. **`01_preprocess_methylation.R`** — minfi: read IDATs → QC (detP, sex check) →
    drop failed samples → **Houseman cell-type deconvolution** (FlowSorted.Blood.EPIC/
-   IDOL; 6 proportions written into pheno) → functional normalization → probe
-   filtering → Beta/M matrices. NB: deconvolution is done by **`01a_cell_counts.R`**
-   (low-memory `projectCellType_CP` + compTable path) and cached to
-   `cell_counts.csv`; the inline `estimateCellCounts2` OOMs on this host and is only a
-   fallback. `01b_finalize_from_grset.R` recovers the save step if it fails midway.
-   The genome-wide EWAS itself lives in **`03a_ewas.R`** (Sections 0–3 of `03`),
-   runnable without expression data.
+   IDOL; 6 proportions written into pheno) → **noob+quantile normalization**
+   (`cfg$normalization` default — funnorm is available as a sensitivity option but has
+   the highest peak memory and OOMs on this host) → probe filtering → Beta/M matrices.
+   NB: deconvolution is done by **`01a_cell_counts.R`** (low-memory
+   `projectCellType_CP` + compTable path) and cached to `cell_counts.csv`; the inline
+   `estimateCellCounts2` OOMs on this host and is only a fallback.
+   `01b_finalize_from_grset.R` recovers the save step if it fails midway. The
+   genome-wide EWAS itself lives in **`03a_ewas.R`** (Sections 0–3 of `03`), runnable
+   without expression data.
+   **Cross-reactive probe filtering currently SELF-SKIPS** — it looks for
+   `data/raw/annotation/Pidsley2016_crossreactive.csv` (absent). The **`maxprobes`**
+   package (github.com/markgene/maxprobes; bundles the Pidsley et al. 2016 EPIC
+   cross-reactive list, 43,256 probes) is now installed to supply it but is **NOT yet
+   wired in — that is the FIRST task next session** (see [[maxprobes-crossreactive]]:
+   arg is `array_type`, returns a `list` so `unlist()` before `%in%`; depends on
+   `minfiData`).
 2. **`02_preprocess_expression.R`** — load processed HT-12 matrix → provider QC-flag
    filtering (`probe_QCok`, `expressed_blood`, drop `is_purecontrol`) → subset to the
    48 paired samples → optional gene collapse. ComBat wired but OFF (data pre-corrected).
@@ -109,8 +130,11 @@ lands. Full plain-language status lives in
    (25 genes), tagged in `03` for a powered arm. See "Candidate gene sourcing".
 6. **Pathway enrichment** — clusterProfiler on concordant genes (not yet scripted).
 
-Note: the genome-wide EWAS lives **inside `03_concordance.R`** (its stage 1), not a
-separate script — a deliberate decision (an earlier plan draft split them).
+Note: the genome-wide EWAS lives inside `03_concordance.R` (its stage 1) and is ALSO
+available standalone as **`03a_ewas.R`** — Sections 0–3 carved out, sharing `03`'s
+config + stats verbatim, so the methylation discovery scan can run before the
+expression data arrives. The two produce the identical EWAS table (`03a` was added
+this session because expression is still blocked).
 Caveat carried in `04`: Klemp's 2% mean-diff floor was for a BINARY contrast; with
 continuous `DietScore` `meandiff` is per-unit, so that floor is scale-dependent and
 may over-filter (the script logs a warning if it removes all FDR-significant DMRs).
@@ -136,8 +160,16 @@ may over-filter (the script logs a warning if it removes all FDR-significant DMR
 
 ## Tech stack
 - **R** for genomics statistics: `minfi`, `ChAMP`, `limma`, `DMRcate` (DMR calling),
-  `sva`, `FlowSorted.Blood.EPIC`, `clusterProfiler`, `org.Hs.eg.db`.
-  Setup: `scripts/install_r_packages.R`.
+  `sva`, `FlowSorted.Blood.EPIC`, `clusterProfiler`, `org.Hs.eg.db`, plus `maxprobes`
+  (cross-reactive list, from GitHub — needs `minfiData`). Setup:
+  `scripts/install_r_packages.R` — pins **Bioconductor 3.23**, installs
+  non-interactively into the user library (`R_LIBS_USER`), verifies the objects the
+  pipeline needs, and records `results/qc/r_package_versions.txt`.
+  `scripts/install_flowsorted.R` is a targeted re-installer for the cell-type
+  reference. **Host env:** R 4.6.1; `Rscript` is NOT on PATH in Git Bash
+  (`C:\Program Files\R\R-4.6.1\bin\Rscript.exe`); ~7.8 GB RAM and segfault-prone under
+  rapid `Rscript -e` calls, so run installs/checks as script files, not one-liners
+  (see [[houseman-lowmem-and-host-limits]]).
 - **Python** for data wrangling / glue / the eventual dashboard (`requirements.txt`:
   pandas, numpy, openpyxl, matplotlib, seaborn, jupyter).
 
@@ -156,3 +188,8 @@ results.
   `results/tables/`; figures → `results/figures/`.
 - Scripts run non-interactively (`Rscript scripts/NN_*.R`), self-contained `cfg` list
   at top, fail-fast file checks, and each writes a `sessionInfo` record.
+- **Large outputs stay out of git:** `data/processed/*.rds` are gitignored; full
+  genome-wide result tables (e.g. the 806k-row EWAS, `ewas_diet_methylation.csv.gz`)
+  are gitignored + regenerable — only trimmed subsets are tracked (e.g.
+  `ewas_diet_significant.csv`, p<1e-3 hits). Big scatter plots are rasterized PNGs,
+  not multi-MB vector PDFs (an 806k-point volcano PDF was ~31 MB → PNG ~30 KB).
