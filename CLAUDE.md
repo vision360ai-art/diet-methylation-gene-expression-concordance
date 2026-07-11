@@ -76,12 +76,20 @@ technical brief.
    `sign(b_diet_expr) == sign(b_diet_meth × b_eqtm)`. limma moderated stats; covariates
    Age+Sex+BMI, cell types adjust the methylation model (one dropped as reference to
    avoid collinearity — proportions sum to 1).
-4. **Candidate-gene follow-up** — `data/raw/annotation/candidate_genes.txt`
+4. **`04_dmr.R`** — DMRcate region-level analysis, companion to `03`'s per-CpG
+   EWAS. Same `DietScore + Age + Sex + BMI + 5 cell-type` design → diet-associated
+   DMRs + overlapping genes, Klemp-comparable params (λ=1000, C=2, >2 CpGs,
+   min-smoothed-FDR<5%, |meandiff|≥2%). Scope: DMR calling + gene annotation only
+   (no expression concordance). Flags DMRs overlapping the candidate list.
+5. **Candidate-gene follow-up** — `data/raw/annotation/candidate_genes.txt`
    (25 genes), tagged in `03` for a powered arm. See "Candidate gene sourcing".
-5. **Pathway enrichment** — clusterProfiler on concordant genes (not yet scripted).
+6. **Pathway enrichment** — clusterProfiler on concordant genes (not yet scripted).
 
 Note: the genome-wide EWAS lives **inside `03_concordance.R`** (its stage 1), not a
 separate script — a deliberate decision (an earlier plan draft split them).
+Caveat carried in `04`: Klemp's 2% mean-diff floor was for a BINARY contrast; with
+continuous `DietScore` `meandiff` is per-unit, so that floor is scale-dependent and
+may over-filter (the script logs a warning if it removes all FDR-significant DMRs).
 
 ## Candidate gene sourcing & provenance
 - **Sourced from the real paper, not memory.** The 25 genes were extracted directly

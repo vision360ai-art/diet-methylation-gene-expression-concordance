@@ -123,7 +123,10 @@ know the actual shape of the output data.
 
 ---
 
-### Open loose end
-`DMRcate` (differentially methylated **region** calling) is installed and listed
-in the tech stack but does not yet have a step in this plan — decide whether to add
-a DMR-level arm alongside the per-CpG EWAS.
+### DMR-level arm ✅ *written* · ⏳ *needs real data to run*
+`scripts/04_dmr.R` — region-level companion to the per-CpG EWAS, using `DMRcate`
+with Klemp-comparable parameters. Produces a ranked table of diet-associated DMRs
+and their overlapping genes (scope: calling + annotation only; no expression
+concordance). Note: Klemp's 2% mean-difference floor was calibrated for a binary
+healthy-vs-unhealthy contrast; with continuous `DietScore` the region `meandiff` is
+per-unit, so that floor is scale-dependent — the script warns if it over-filters.
