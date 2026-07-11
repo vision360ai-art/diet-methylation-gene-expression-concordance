@@ -46,13 +46,32 @@ dataset/question combination that does not appear to be previously published
   `probe_annot` path is confirmed to `Gx_probe_info`; the `expr_matrix` filename/
   columns are still marked `# CONFIRM`.
 
-## Current status & blockers (2026-07-10)
-Pipeline is **fully scaffolded and pushed** (`01`→`03`, install script, candidate
-list, docs) but **nothing has been run** — `data/processed/` and `results/` are
-empty. **Two missing raw files block everything downstream:** the methylation
-**IDATs** (0/98 present) and the **expression values matrix**. Full plain-language
-status lives in [`docs/execution_plan.md`](docs/execution_plan.md); this file is the
-technical brief.
+## Current status & blockers (2026-07-11)
+**Methylation side is RUN and the EWAS is done.** `01` has run on the **36** paired
+samples that have usable IDATs (12 of the 48 IDAT pairs are still missing) →
+`data/processed/{beta,m}_values.rds`, `grSet…rds`, `pheno_methylation.{rds,csv}` with
+the 6 Houseman cell-type proportions. Cell-type deconvolution runs via the low-memory
+`01a_cell_counts.R` path (see [[houseman-lowmem-and-host-limits]] memory): the host
+OOMs on `estimateCellCounts2`, so 01 reads a cached `cell_counts.csv`.
+
+**EWAS result** (`03a_ewas.R`, the carved-out Sections 0–3 of `03`; model
+`M ~ DietScore + Age + Sex + BMI + 5 cell-type props`, n=36, 806,845 CpGs):
+- **0** CpGs at genome-wide FDR<0.05 — *expected* at this n (EWAS is discovery, not
+  the inference stage).
+- **996** CpGs at nominal **p<1e-3** (100 at p<1e-4, 9 at p<1e-5). Top hit
+  **cg07018629, p=6.9e-7**.
+- These 996 are the **discovery pool** that feeds the concordance analysis (unioned
+  with top-N, then FDR-controlled *within* the CpG–gene pair set) once expression
+  data arrives. Tracked as `results/tables/ewas_diet_significant.csv`; the full
+  806k-row table is gitignored (`ewas_diet_methylation.csv.gz`, regenerable).
+
+**Remaining blocker (expression only):** the **expression values matrix** is not
+downloaded, so `02_preprocess_expression.R` can't produce `expr_gene_paired.rds`,
+which `03`'s expression/eQTM/concordance stages need. `02`'s `# CONFIRM` column names
+were checked against the real probe-annotation + sample-info files and are all
+correct — only the values-matrix filename/orientation remain unverifiable until it
+lands. Full plain-language status lives in
+[`docs/execution_plan.md`](docs/execution_plan.md); this file is the technical brief.
 
 ## Known limitations (stated upfront, not compromises)
 - **n=48 paired is underpowered** for genome-wide FDR across ~850K probes.
@@ -65,9 +84,14 @@ technical brief.
 
 ## Analysis plan / pipeline (`scripts/`, numbered by order)
 1. **`01_preprocess_methylation.R`** — minfi: read IDATs → QC (detP, sex check) →
-   drop failed samples → **Houseman cell-type deconvolution** (`estimateCellCounts2`,
-   FlowSorted.Blood.EPIC/IDOL; 6 proportions written into pheno) → functional
-   normalization → probe filtering → Beta/M matrices.
+   drop failed samples → **Houseman cell-type deconvolution** (FlowSorted.Blood.EPIC/
+   IDOL; 6 proportions written into pheno) → functional normalization → probe
+   filtering → Beta/M matrices. NB: deconvolution is done by **`01a_cell_counts.R`**
+   (low-memory `projectCellType_CP` + compTable path) and cached to
+   `cell_counts.csv`; the inline `estimateCellCounts2` OOMs on this host and is only a
+   fallback. `01b_finalize_from_grset.R` recovers the save step if it fails midway.
+   The genome-wide EWAS itself lives in **`03a_ewas.R`** (Sections 0–3 of `03`),
+   runnable without expression data.
 2. **`02_preprocess_expression.R`** — load processed HT-12 matrix → provider QC-flag
    filtering (`probe_QCok`, `expressed_blood`, drop `is_purecontrol`) → subset to the
    48 paired samples → optional gene collapse. ComBat wired but OFF (data pre-corrected).

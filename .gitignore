@@ -13,6 +13,11 @@ data/processed/*.RData
 data/processed/*.idat
 data/processed/*.idat.gz
 
+# Full genome-wide result tables: large (~35 MB gzipped) and regenerable by the
+# scripts. Track only the small trimmed subsets (e.g. ewas_diet_significant.csv).
+results/tables/ewas_diet_methylation.csv
+results/tables/ewas_diet_methylation.csv.gz
+
 # R
 .Rhistory
 .RData

@@ -143,7 +143,12 @@ log_msg("EWAS: %s ~ diet + covars + cell-type over %d CpGs...",
 fit_m  <- eBayes(lmFit(mval[, rownames(d_meth$mm)], d_meth$mm))
 ewas   <- topTable(fit_m, coef = d_meth$coef, number = Inf, sort.by = "p")
 ewas$CpG <- rownames(ewas)
-fwrite(ewas, file.path(cfg$tbl_dir, "ewas_diet_methylation.csv"))
+# Full table: gzipped (~35 MB), GITIGNORED + regenerable. fread() auto-decompresses.
+# (03a_ewas.R writes this same pair of files for EWAS-only runs.)
+fwrite(ewas, file.path(cfg$tbl_dir, "ewas_diet_methylation.csv.gz"))
+# Tracked artifact: the nominal-significant discovery pool only (small).
+sig <- ewas[ewas$P.Value < cfg$ewas_p_discovery, ]
+fwrite(sig[order(sig$P.Value), ], file.path(cfg$tbl_dir, "ewas_diet_significant.csv"))
 log_msg("EWAS done. Genome-wide FDR<0.05: %d CpGs (expected ~0 at n=48).",
         sum(ewas$adj.P.Val < 0.05))
 
@@ -258,8 +263,8 @@ log_msg("Concordant pairs: %d nominal, %d at FDR<%.2f (%d in candidate genes).",
 # ----------------------------------------------------------------------------
 # 8. Figures
 # ----------------------------------------------------------------------------
-# EWAS volcano
-pdf(file.path(cfg$fig_dir, "ewas_volcano.pdf"), width = 6, height = 6)
+# EWAS volcano (rasterized PNG: 806k points -> KB not a ~31 MB vector PDF)
+png(file.path(cfg$fig_dir, "ewas_volcano.png"), width = 1200, height = 1200, res = 200)
 plot(ewas$logFC, -log10(ewas$P.Value), pch = 16, cex = 0.3, col = "grey60",
      xlab = "Diet effect on M-value", ylab = "-log10 p", main = "EWAS: diet -> methylation")
 abline(h = -log10(cfg$ewas_p_discovery), col = "red", lty = 2)
