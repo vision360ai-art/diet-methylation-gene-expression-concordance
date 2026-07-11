@@ -1,0 +1,56 @@
+[20:22:23] Loading sample sheet: data/raw/SampleSheet_V2.csv
+[20:22:23] Sample sheet: 98 samples, 19 columns
+[20:22:23]   Sample_Group: 2.high=25, 2.low=23, 4.high=25, 4.low=25
+[20:22:23] Restricting to paired samples (Synonym in expression sampleID): 48/98 kept.
+[20:22:23] Excluding 12/48 sample(s) without a usable IDAT pair:
+[20:22:23]   - A15JXV   (204073520039_R06C01): both IDATs missing
+[20:22:23]   - A141NQ   (204073520049_R02C01): both IDATs missing
+[20:22:23]   - A141CB   (204073520049_R03C01): both IDATs missing
+[20:22:23]   - A14AUB   (204073520049_R04C01): both IDATs missing
+[20:22:23]   - A12EX5   (204792210117_R01C01): both IDATs missing
+[20:22:23]   - A13FKJ   (204792210117_R06C01): both IDATs missing
+[20:22:23]   - A130ZC   (204792210124_R01C01): both IDATs missing
+[20:22:23]   - A157RL   (204792210124_R02C01): both IDATs missing
+[20:22:23]   - A15GF9   (204073520039_R07C01): both IDATs missing
+[20:22:23]   - A13YLB   (204073520049_R01C01): both IDATs missing
+[20:22:23]   - A14AV9   (204073520049_R05C01): both IDATs missing
+[20:22:23]   - A14ARH   (204073520049_R07C01): both IDATs missing
+[20:22:23] Proceeding with 36 sample(s) that have complete, non-trivial IDAT pairs.
+[20:22:23] Reading 36 IDAT pairs (this can take a few minutes)...
+[20:23:43] RGChannelSet: 1051815 probes x 36 samples | array: IlluminaHumanMethylationEPIC
+[20:24:25] Computing detection p-values...
+null device 
+          1 
+Warning: BISULFITE CONVERSION I probes outside plot range
+Warning: SPECIFICITY I probes outside plot range
+Warning: SPECIFICITY I probes outside plot range
+null device 
+          1 
+There were 50 or more warnings (use warnings() to see the first 50)
+null device 
+          1 
+null device 
+          1 
+[20:26:39] Sample QC: keeping 36 / 36 (dropped: none)
+[20:26:39] SKIPPING Houseman cell-type step: FlowSorted.Blood.EPIC not installed.
+[20:26:39]   -> pheno will lack CD8T/CD4T/NK/Bcell/Mono/Neu columns. Install the
+[20:26:39]      package and re-run for the full covariate set; 03's design
+[20:26:39]      self-adjusts to whichever covariates are present.
+[20:26:39] Normalizing (method = noob_quantile)...
+[preprocessQuantile] Mapping to genome.
+[preprocessQuantile] Fixing outliers.
+[preprocessQuantile] Quantile normalizing.
+Warning message:
+In preprocessQuantile(mSet) :
+  preprocessQuantile has only been tested with 'preprocessRaw'
+[20:29:04] Normalized GenomicRatioSet: 865859 probes x 36 samples
+[20:29:06] Probe filter | detection-p: removed 11969 (1.4%)
+[20:29:07] Probe filter | SNP loci: removed 28627
+[20:29:09] Probe filter | sex chromosomes: removed 18418
+[20:29:09] Probe filter | cross-reactive: SKIPPED (list not found at data/raw/annotation/Pidsley2016_crossreactive.csv)
+[20:29:09] Final probe set: 806845 (93.2% of 865859 retained)
+[20:29:17] Beta matrix: 806845 x 36 | M matrix: 806845 x 36
+null device 
+          1 
+[20:30:08] Saved outputs to data/processed/ and QC figures to results/qc/
+[20:30:08] Done.

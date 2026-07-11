@@ -56,7 +56,13 @@ cfg <- list(
                                  # so this only catches empty/truncated/stub files
 
   # --- switches ---
-  normalization        = "funnorm",  # "funnorm" (default) | "noob_quantile"
+  # noob_quantile is the default here (not funnorm): funnorm runs noob internally
+  # then fits an additional cross-sample regression, giving it the highest peak
+  # memory of any step -- it OOMs on this RAM-constrained host. noob+quantile has a
+  # strictly lower peak AND is the better-matched normalization for blood diet EWAS,
+  # where effects are small/local rather than the large global shifts funnorm targets
+  # (Fortin et al. 2014). funnorm remains available as a later sensitivity check.
+  normalization        = "noob_quantile",  # "noob_quantile" (default) | "funnorm"
   drop_sex_chromosomes = TRUE,        # blood/diet analysis: usually TRUE
   drop_snp_probes      = TRUE,
   drop_crossreactive   = TRUE,
@@ -213,14 +219,27 @@ pred_sex <- getSex(gmSet)
 targets$predictedSex <- pred_sex$predictedSex
 sex_mismatch <- toupper(substr(targets$predictedSex, 1, 1)) !=
                 toupper(substr(as.character(targets$Sex), 1, 1))
+# Plot manually rather than minfi::plotSex(): that helper calls colData() on the
+# getSex DFrame, which fails under this minfi/S4Vectors version. Same diagnostic.
 pdf(file.path(cfg$qc_dir, "qc_predicted_sex.pdf"), width = 6, height = 6)
-plotSex(pred_sex, id = targets$Sample_Name)
+plot(pred_sex$xMed, pred_sex$yMed,
+     col = ifelse(pred_sex$predictedSex == "M", "steelblue", "firebrick"),
+     pch = 16, xlab = "chrX median total intensity (log2)",
+     ylab = "chrY median total intensity (log2)", main = "Predicted sex (getSex)")
+text(pred_sex$xMed, pred_sex$yMed, labels = targets$Sample_Name, cex = 0.5, pos = 3)
+legend("bottomleft", c("predicted M", "predicted F"),
+       col = c("steelblue", "firebrick"), pch = 16, bty = "n")
 dev.off()
 if (any(sex_mismatch, na.rm = TRUE)) {
   log_msg("WARNING: %d sample(s) with predicted != reported sex: %s",
           sum(sex_mismatch, na.rm = TRUE),
           paste(targets$Sample_Name[which(sex_mismatch)], collapse = ", "))
 }
+
+# Free the large QC intermediates (raw MethylSet + genome-mapped set) before the
+# memory-heavy normalization -- they are not needed past the sex check. On a
+# RAM-constrained host this is the difference between funnorm fitting or OOMing.
+rm(mSetRaw, gmSet, qc, pred_sex); invisible(gc())
 
 # ----------------------------------------------------------------------------
 # 4. Drop failed samples
@@ -248,8 +267,32 @@ targets <- targets[keep_samples, ]
 # The 6 proportions are written as columns into pData(rgSet) so they propagate
 # through preprocessFunnorm into grSet's pheno and become model covariates
 # downstream (no re-read, no join needed).
-if (have_flowsorted) {
-  log_msg("Estimating blood cell-type proportions (Houseman / IDOL)...")
+#
+# Memory note: estimateCellCounts2 co-normalizes with a ~37-sample reference
+# (~73 samples x 1.05M probes, noob) and OOMs when run inline here on a RAM-
+# constrained host (it fires while rgSet + detP are both resident). So we PREFER a
+# cached table from scripts/01a_cell_counts.R -- an isolated process that holds only
+# rgSet + the reference. If the cache is absent we fall back to the inline call and
+# write the cache for next time.
+cell_cache <- file.path(cfg$out_dir, "cell_counts.csv")
+cell_counts <- NULL
+
+if (file.exists(cell_cache)) {
+  log_msg("Loading cached cell-type proportions: %s", cell_cache)
+  cc <- read.csv(cell_cache, row.names = 1, check.names = FALSE)
+  missing <- setdiff(sampleNames(rgSet), rownames(cc))
+  if (length(missing)) {
+    log_msg("  WARNING: cache is missing %d sample(s): %s -- ignoring cache, recomputing.",
+            length(missing), paste(missing, collapse = ", "))
+  } else {
+    cell_counts <- cc[sampleNames(rgSet), , drop = FALSE]   # enforce order
+  }
+}
+
+if (is.null(cell_counts) && have_flowsorted) {
+  log_msg("Estimating blood cell-type proportions inline (Houseman / IDOL)...")
+  log_msg("  NOTE: high peak memory -- if this OOMs, run scripts/01a_cell_counts.R")
+  log_msg("        (isolated process) to produce %s, then re-run 01.", cell_cache)
   cell_est <- estimateCellCounts2(
     rgSet,
     compositeCellType   = "Blood",
@@ -262,7 +305,11 @@ if (have_flowsorted) {
   )
   cell_counts <- as.data.frame(cell_est$counts)     # samples x 6, rows = sample names
   cell_counts <- cell_counts[sampleNames(rgSet), , drop = FALSE]  # enforce order
+  write.csv(cell_counts, cell_cache, row.names = TRUE)            # cache for re-runs
+  log_msg("  Cached cell proportions -> %s", cell_cache)
+}
 
+if (!is.null(cell_counts)) {
   for (ct in colnames(cell_counts)) {
     pData(rgSet)[[ct]] <- cell_counts[[ct]]
     targets[[ct]]      <- cell_counts[[ct]]
@@ -277,10 +324,10 @@ if (have_flowsorted) {
           main = "Houseman blood cell-type proportions", col = "grey80")
   dev.off()
 } else {
-  log_msg("SKIPPING Houseman cell-type step: FlowSorted.Blood.EPIC not installed.")
+  log_msg("SKIPPING Houseman cell-type step: no cache and FlowSorted.Blood.EPIC not usable.")
   log_msg("  -> pheno will lack CD8T/CD4T/NK/Bcell/Mono/Neu columns. Install the")
-  log_msg("     package and re-run for the full covariate set; 03's design")
-  log_msg("     self-adjusts to whichever covariates are present.")
+  log_msg("     package (scripts/install_flowsorted.R) and run scripts/01a_cell_counts.R,")
+  log_msg("     then re-run 01; 03's design self-adjusts to whichever covariates exist.")
 }
 
 # ----------------------------------------------------------------------------
@@ -290,10 +337,17 @@ log_msg("Normalizing (method = %s)...", cfg$normalization)
 if (cfg$normalization == "funnorm") {
   # Functional normalization: recommended when global methylation differences
   # are expected between groups (here: lifestyle-extreme case/control design).
+  # NOTE: highest peak memory of any step -- can OOM on RAM-constrained hosts.
   grSet <- preprocessFunnorm(rgSet)
 } else if (cfg$normalization == "noob_quantile") {
+  # Lower-peak path. Free the raw RGChannelSet between the two stages: nothing
+  # downstream needs it once normalization starts (Houseman + detP already ran,
+  # probe filtering works off grSet + the cached detP), and dropping it here is
+  # what keeps quantile normalization inside the memory envelope.
   mSet  <- preprocessNoob(rgSet)
+  rm(rgSet); invisible(gc())
   grSet <- preprocessQuantile(mSet)   # returns a GenomicRatioSet
+  rm(mSet); invisible(gc())
 } else {
   stop("Unknown cfg$normalization: ", cfg$normalization)
 }
@@ -374,10 +428,27 @@ dev.off()
 # 9. Save processed objects
 # ----------------------------------------------------------------------------
 pheno <- as.data.frame(pData(grSet))   # includes the 6 cell-type proportions
-saveRDS(grSet, file.path(cfg$out_dir, "grSet_normalized_filtered.rds"))
-saveRDS(beta,  file.path(cfg$out_dir, "beta_values.rds"))
-saveRDS(mval,  file.path(cfg$out_dir, "m_values.rds"))
-saveRDS(pheno, file.path(cfg$out_dir, "pheno_methylation.rds"))
+
+# Robust writer: on this host, antivirus real-time scanning intermittently locks a
+# freshly-written large .rds and makes saveRDS fail with "error writing to
+# connection". Retry a few times (removing the partial file first) so a transient
+# lock doesn't discard a completed normalization.
+robust_saveRDS <- function(obj, path, tries = 4, wait = 5) {
+  for (i in seq_len(tries)) {
+    ok <- tryCatch({ saveRDS(obj, path); TRUE },
+                   error = function(e) { log_msg("  saveRDS(%s) attempt %d/%d failed: %s",
+                                                 basename(path), i, tries, conditionMessage(e)); FALSE })
+    if (ok) return(invisible(TRUE))
+    if (file.exists(path)) unlink(path)      # drop the truncated/0-byte file
+    Sys.sleep(wait); invisible(gc())
+  }
+  stop("Could not write ", path, " after ", tries, " attempts.")
+}
+
+robust_saveRDS(grSet, file.path(cfg$out_dir, "grSet_normalized_filtered.rds"))
+robust_saveRDS(beta,  file.path(cfg$out_dir, "beta_values.rds"))
+robust_saveRDS(mval,  file.path(cfg$out_dir, "m_values.rds"))
+robust_saveRDS(pheno, file.path(cfg$out_dir, "pheno_methylation.rds"))
 write.csv(pheno, file.path(cfg$out_dir, "pheno_methylation.csv"), row.names = FALSE)
 
 log_msg("Saved outputs to %s/ and QC figures to %s/", cfg$out_dir, cfg$qc_dir)

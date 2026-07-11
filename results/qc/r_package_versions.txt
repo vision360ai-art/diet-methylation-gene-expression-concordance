@@ -1,0 +1,15 @@
+Recorded by install_r_packages.R
+R: 4.6.1
+Bioconductor: 3.23
+
+Critical package versions:
+  minfi                                          1.58.0
+  limma                                          3.68.4
+  DMRcate                                        3.8.0
+  sva                                            3.60.0
+  clusterProfiler                                4.20.0
+  IlluminaHumanMethylationEPICmanifest           0.3.0
+  FlowSorted.Blood.EPIC                          2.16.0
+  FlowSorted.CordBloodCombined.450k              1.28.0
+  IlluminaHumanMethylationEPICanno.ilm10b4.hg19  0.6.0
+  matrixStats                                    1.5.0
