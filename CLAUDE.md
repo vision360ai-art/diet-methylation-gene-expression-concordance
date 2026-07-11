@@ -12,6 +12,16 @@ sex? This applies an established methylation↔expression concordance framework 
 dataset/question combination that does not appear to be previously published
 (extends Klemp et al. 2022, which analyzed LIFE-Adult methylation only).
 
+> **⚠️ EXPRESSION-SIDE PIVOT (2026-07-11).** The paired LIFE-Adult expression matrix
+> never became available. Expression now comes from a **separate public cohort,
+> GSE109597** (see Data structure). This breaks the original *within-subject* design:
+> methylation and expression are no longer from the same people, so the **eQTM /
+> paired concordance stage cannot be computed within samples** as written. The
+> question must be reframed as a **cross-cohort, cross-platform, cross-exposure**
+> integration (diet→methylation in LIFE vs. obesity→expression in GSE109597), with
+> the mismatch documented honestly. Working out that reframing + adapting `02`/`03` is
+> the main next-session task — it is NOT yet resolved in the code.
+
 ## Data structure (`data/raw/`, gitignored)
 | File | What | n | Platform |
 |---|---|---|---|
@@ -20,12 +30,21 @@ dataset/question combination that does not appear to be previously published
 | `Gx_probe_info-21-06-15_v3.txt` | Expression probe annotation + QC flags (48,106 probes × 42 cols) | — | — |
 | `Gx_DataDictionary-21-06-15_v3.xlsx` | Column docs for sample_info + probe annotation | — | — |
 | `Clinical…Klemp…2022.pdf` | Source paper (candidate-gene provenance, see below) | — | — |
+| `GSE109597_series_matrix.txt.gz` | **Expression VALUES — the actual expression source now** | 84 | **Affymetrix U133 Plus 2.0 (GPL570)**, whole blood |
 
-- **Cross-assay linkage:** methylation `Synonym` column == expression `sampleID`.
-  Verified overlap = **48 subjects** with both assays. Paired cohort is 25F / 23M
-  (so `Sex` is a real covariate). `DietScore` range 3–24, continuous.
-- Preprocessing relabels expression columns from `sampleID` → methylation
-  `Sample_Name` so both assays share one sample key downstream.
+- **The LIFE-Adult `Gx_*` files are methylation-paired but VALUE-LESS:** only probe
+  annotation + sample metadata ever arrived, never the per-sample values. They are now
+  effectively legacy — the expression *values* come from **GSE109597** instead.
+- **GSE109597** ("Predictive computational obesity risk framework…", NIH/NINR): 84
+  whole-blood samples (design says n=90 — reconcile the 6-sample gap next session),
+  Affymetrix U133 Plus 2.0, **already log2/RMA-normalized**. Value matrix is `ID_REF`
+  (Affy probeset, e.g. `1007_s_at`; 54,675 probesets) × `GSM…` sample columns,
+  starting after `!series_matrix_table_begin` (line 71). Exposure framing is
+  **obesity/BMI risk**, not diet — different people AND a different question.
+- **Cross-assay linkage NO LONGER HOLDS for expression.** The old
+  `Synonym`==`sampleID` (48 paired LIFE subjects, 25F/23M, `DietScore` 3–24) linked
+  methylation to the LIFE expression that never materialised; GSE109597 samples are
+  unrelated individuals, so there is no within-subject key to join on.
 - **Tracked curated input:** `data/raw/annotation/candidate_genes.txt` is the one
   file under `data/raw/` that IS git-tracked (a `.gitignore` exception) — it's a
   derived analysis input, not bulk raw data.
@@ -38,13 +57,14 @@ dataset/question combination that does not appear to be previously published
 - **IDAT files not yet in repo.** minfi needs the raw `*_Grn.idat`/`*_Red.idat`
   pairs; they are gitignored and expected in **`data/raw/idat/`**. Script 01 fails
   fast with a clear message if absent.
-- **Expression values matrix not yet downloaded.** The probe *annotation*
-  (`Gx_probe_info`) and *sample* metadata ARE in hand, but the per-sample values
-  matrix is not. Data dictionary implies it ships already normalized/batch-
-  corrected/imputed (per-probe QC flags), so script 02 loads a processed matrix +
-  applies provider flags rather than doing bead-level normalization. `02`'s
-  `probe_annot` path is confirmed to `Gx_probe_info`; the `expr_matrix` filename/
-  columns are still marked `# CONFIRM`.
+- **Expression source = GSE109597 (Affymetrix), NOT the LIFE Illumina data.**
+  `02_preprocess_expression.R` as written targets the LIFE HT-12 layout (Illumina
+  probe IDs, `symbol_INGENUITY` gene column, provider QC flags) — **none of that
+  applies to GSE109597**. The GSE matrix is already log2/RMA-normalized (so no
+  provider-flag filtering step), keyed by Affy probeset IDs that need a **GPL570 /
+  `hgu133plus2.db` probeset→gene-symbol mapping** (a different annotation than
+  Illumina), with multi-probeset-per-gene collapse. `02` needs a real rewrite for this
+  source — the `# CONFIRM` items are moot. This is next-session work.
 
 ## Current status & blockers (2026-07-11)
 **Methylation side is RUN and the EWAS is done.** `01` has run on the **36** paired
@@ -65,12 +85,14 @@ OOMs on `estimateCellCounts2`, so 01 reads a cached `cell_counts.csv`.
   data arrives. Tracked as `results/tables/ewas_diet_significant.csv`; the full
   806k-row table is gitignored (`ewas_diet_methylation.csv.gz`, regenerable).
 
-**Remaining blocker (expression only):** the **expression values matrix** is not
-downloaded, so `02_preprocess_expression.R` can't produce `expr_gene_paired.rds`,
-which `03`'s expression/eQTM/concordance stages need. `02`'s `# CONFIRM` column names
-were checked against the real probe-annotation + sample-info files and are all
-correct — only the values-matrix filename/orientation remain unverifiable until it
-lands. Full plain-language status lives in
+**Expression data now IN HAND — but from a different cohort (see the pivot note at
+top).** `GSE109597_series_matrix.txt.gz` (Affymetrix U133 Plus 2.0, 84 whole-blood
+samples, obesity-risk study) is downloaded + verified. So the remaining work is not
+"download" but "**reconcile**": (a) rewrite `02` to parse the GSE series matrix (Affy
+probeset→gene via GPL570/`hgu133plus2.db`; already log2/RMA-normalized, so no
+provider-flag step); (b) redesign `03`'s concordance since the eQTM cannot be
+within-subject across two unrelated cohorts; (c) document the cohort/platform/exposure
+mismatch in the methods. Full plain-language status lives in
 [`docs/execution_plan.md`](docs/execution_plan.md); this file is the technical brief.
 
 **Exploratory QC** (`explore_methylation_structure.R`, raw vs. cell-corrected): raw
@@ -80,17 +102,26 @@ residualizing on the 6 proportions removes it and **age** emerges as the next ax
 correction — expected, and the motivation for the supervised, covariate-adjusted EWAS.
 Figures: `results/figures/pca_{raw,cellcorr}_*`, `hclust_{raw,cellcorr}_*`.
 
-**Next session, in order:** (1) wire `maxprobes` cross-reactive filtering into `01`
-(the one filter still self-skipping); (2) obtain the expression values matrix → set
-`02`'s three `# CONFIRM` items → run `02` → `03` for the full concordance analysis.
+**Next session:** (1) quick + independent — wire `maxprobes` cross-reactive filtering
+into `01`. (2) the major task — parse the `GSE109597` value section (past the line-71
+`!series_matrix_table_begin` header), rewrite `02` for Affymetrix/GSE109597, and
+redesign `03`'s concordance for the cross-cohort / cross-exposure reality, with the
+mismatch caveat written into the methods (see [[gse109597-expression-pivot]]).
 
 ## Known limitations (stated upfront, not compromises)
 - **n=48 paired is underpowered** for genome-wide FDR across ~850K probes (and only
   **36** are currently usable — 12 IDAT pairs still missing; the EWAS ran on 36).
   Handled by treating EWAS as *discovery* (nominal-p + top-N) and controlling FDR
   *within* the CpG–gene pair set, plus a candidate-gene arm.
-- **Both platforms are arrays** (EPIC + HT-12v4), not WGBS/RRBS or RNA-seq. This is
-  standard practice for paired human-cohort data of this type, not a shortcut.
+- **Both platforms are arrays** (methylation EPIC; expression now **Affymetrix U133
+  Plus 2.0** via GSE109597, not the originally-planned Illumina HT-12v4), not
+  WGBS/RRBS or RNA-seq.
+- **Cross-cohort / cross-exposure expression — the biggest caveat, from the pivot.**
+  Expression (GSE109597) and methylation (LIFE-Adult) are DIFFERENT people, DIFFERENT
+  array platforms, and DIFFERENT exposures (obesity/BMI risk vs. diet quality). There
+  is no within-subject eQTM; "concordance" degrades to gene-level agreement in effect
+  *direction* across two cohorts — much weaker, and must be stated plainly, not
+  papered over. Reframing the analysis honestly around this is next-session work.
 - **Blood cell composition** is the dominant methylation confounder — corrected via
   Houseman deconvolution (see pipeline).
 
@@ -113,14 +144,24 @@ Figures: `results/figures/pca_{raw,cellcorr}_*`, `hclust_{raw,cellcorr}_*`.
    wired in — that is the FIRST task next session** (see [[maxprobes-crossreactive]]:
    arg is `array_type`, returns a `list` so `unlist()` before `%in%`; depends on
    `minfiData`).
-2. **`02_preprocess_expression.R`** — load processed HT-12 matrix → provider QC-flag
-   filtering (`probe_QCok`, `expressed_blood`, drop `is_purecontrol`) → subset to the
-   48 paired samples → optional gene collapse. ComBat wired but OFF (data pre-corrected).
+2. **`02_preprocess_expression.R`** — **STALE / needs rewrite for GSE109597.** As
+   written it loads the LIFE HT-12 matrix → provider QC-flag filtering
+   (`probe_QCok`, `expressed_blood`, drop `is_purecontrol`) → subset to the 48 paired
+   samples → gene collapse. The expression source pivoted to **GSE109597** (Affymetrix,
+   84 samples, already RMA-normalized), so the Illumina flags/linkage don't apply — the
+   rewrite parses the GSE series matrix and maps Affy probesets→genes (GPL570). See the
+   pivot note + [[gse109597-expression-pivot]].
 3. **`03_concordance.R`** — three-signal framework: (1) diet→methylation EWAS,
    (2) diet→expression DE, (3) methylation↔expression eQTM. Pair is *concordant* when
    `sign(b_diet_expr) == sign(b_diet_meth × b_eqtm)`. limma moderated stats; covariates
    Age+Sex+BMI, cell types adjust the methylation model (one dropped as reference to
    avoid collinearity — proportions sum to 1).
+   **⚠️ Signal (3), the eQTM, assumed methylation + expression in the SAME samples —
+   impossible now that expression is a separate cohort (GSE109597).** The framework
+   must be redesigned (e.g. drop the within-subject eQTM; test cross-cohort gene-level
+   direction agreement between diet→methylation and obesity→expression) — next-session
+   work. `03a`/`03b`/`03c` (EWAS, hit annotation, candidate enrichment) are unaffected —
+   they are methylation-only and already run.
 4. **`04_dmr.R`** — DMRcate region-level analysis, companion to `03`'s per-CpG
    EWAS. Same `DietScore + Age + Sex + BMI + 5 cell-type` design → diet-associated
    DMRs + overlapping genes, Klemp-comparable params (λ=1000, C=2, >2 CpGs,
