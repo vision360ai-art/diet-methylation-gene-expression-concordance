@@ -25,9 +25,13 @@ suppressPackageStartupMessages({
   library(minfi)
   library(IlluminaHumanMethylationEPICmanifest)
   library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
-  library(FlowSorted.Blood.EPIC)
   library(data.table)
 })
+# Cell-type deconvolution reference is optional at load time: the Houseman step
+# (section 5) self-skips with a warning if this package isn't installed, so the
+# rest of preprocessing can still run.
+have_flowsorted <- requireNamespace("FlowSorted.Blood.EPIC", quietly = TRUE)
+if (have_flowsorted) suppressPackageStartupMessages(library(FlowSorted.Blood.EPIC))
 
 # ----------------------------------------------------------------------------
 # 0. Configuration  (edit these; everything below is derived)
@@ -38,10 +42,18 @@ cfg <- list(
   out_dir      = "data/processed",
   qc_dir       = "results/qc",
 
+  # Optional: restrict to methylation+expression PAIRED samples (lower memory, and
+  # matches the concordance focus). Uses the expression sample_info for linkage
+  # (Synonym == sampleID). Set FALSE to process ALL methylation samples with IDATs.
+  restrict_to_paired = TRUE,
+  paired_sample_info = "data/raw/Gx_sample_info-21-06-15_v3.txt",
+
   # --- QC / filtering thresholds ---
   detp_threshold       = 0.01,   # a probe/sample "fails" a well if detP >= this
   sample_detp_max_mean = 0.01,   # drop a sample if its mean detP exceeds this
   probe_detp_max_frac  = 0.01,   # drop a probe failing in > this fraction of samples
+  min_idat_bytes       = 1e5,    # per-channel floor; real EPIC IDATs are ~13.6 MB,
+                                 # so this only catches empty/truncated/stub files
 
   # --- switches ---
   normalization        = "funnorm",  # "funnorm" (default) | "noob_quantile"
@@ -55,6 +67,11 @@ cfg <- list(
 set.seed(cfg$seed)
 dir.create(cfg$out_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(cfg$qc_dir,  recursive = TRUE, showWarnings = FALSE)
+
+# Read IDATs serially. minfi's read.metharray uses BiocParallel internally; the
+# Windows default (SnowParam) spawns worker processes that EACH load the ~300 MB
+# EPIC manifest, which OOMs on large sample sets. SerialParam reads one at a time.
+BiocParallel::register(BiocParallel::SerialParam())
 
 log_msg <- function(...) cat(sprintf("[%s] %s\n", format(Sys.time(), "%H:%M:%S"),
                                      sprintf(...)))
@@ -103,16 +120,54 @@ log_msg("  Sample_Group: %s",
         paste(sprintf("%s=%d", levels(targets$Sample_Group),
                       table(targets$Sample_Group)), collapse = ", "))
 
-# Verify IDATs are present before the (slow) read.
-missing <- !file.exists(paste0(targets$Basename, "_Grn.idat")) &
-           !file.exists(paste0(targets$Basename, "_Grn.idat.gz"))
-if (any(missing)) {
-  stop(sprintf(
-    "%d IDAT file(s) not found under '%s'. First missing: %s\n%s",
-    sum(missing), cfg$idat_dir,
-    basename(targets$Basename[missing][1]),
-    "Place the *_Grn.idat / *_Red.idat pairs there, or fix cfg$idat_dir."))
+# --- Optional restriction to paired (methylation+expression) samples ---------
+if (isTRUE(cfg$restrict_to_paired) && file.exists(cfg$paired_sample_info)) {
+  expr_ids <- data.table::fread(cfg$paired_sample_info)$sampleID
+  is_paired <- targets$Synonym %in% expr_ids
+  log_msg("Restricting to paired samples (Synonym in expression sampleID): %d/%d kept.",
+          sum(is_paired), nrow(targets))
+  targets <- targets[is_paired, , drop = FALSE]
 }
+
+# --- IDAT presence + integrity filter ---------------------------------------
+# The download can be partial (this cohort arrived truncated, e.g. one channel of
+# a pair missing at the cut-off point). Rather than fail-fast on the first gap,
+# keep only samples whose BOTH channels exist and are non-trivially sized, and log
+# every exclusion with a reason for reproducibility.
+resolve <- function(stem, chan) {          # prefer plain .idat, fall back to .gz
+  p <- paste0(stem, "_", chan, ".idat")
+  ifelse(file.exists(p), p, paste0(p, ".gz"))
+}
+grn <- resolve(targets$Basename, "Grn")
+red <- resolve(targets$Basename, "Red")
+size_ok <- function(p) { s <- file.size(p); !is.na(s) & s >= cfg$min_idat_bytes }
+grn_ok <- file.exists(grn) & size_ok(grn)
+red_ok <- file.exists(red) & size_ok(red)
+keep_idat <- grn_ok & red_ok
+
+reason <- rep(NA_character_, nrow(targets))
+reason[!file.exists(grn) & !file.exists(red)] <- "both IDATs missing"
+reason[ file.exists(grn) & !file.exists(red)] <- "Red IDAT missing"
+reason[!file.exists(grn) &  file.exists(red)] <- "Grn IDAT missing"
+reason[is.na(reason) & !keep_idat]            <- "IDAT below min size (truncated?)"
+
+if (any(!keep_idat)) {
+  ex <- data.frame(Sample_Name = targets$Sample_Name[!keep_idat],
+                   Basename     = basename(targets$Basename[!keep_idat]),
+                   reason       = reason[!keep_idat],
+                   stringsAsFactors = FALSE)
+  log_msg("Excluding %d/%d sample(s) without a usable IDAT pair:",
+          nrow(ex), nrow(targets))
+  for (i in seq_len(nrow(ex)))
+    log_msg("  - %-8s (%s): %s", ex$Sample_Name[i], ex$Basename[i], ex$reason[i])
+  write.csv(ex, file.path(cfg$qc_dir, "excluded_samples_idat.csv"), row.names = FALSE)
+}
+targets <- targets[keep_idat, , drop = FALSE]
+if (!nrow(targets))
+  stop("No samples have a complete IDAT pair under '", cfg$idat_dir,
+       "'. Check the download or cfg$idat_dir.")
+log_msg("Proceeding with %d sample(s) that have complete, non-trivial IDAT pairs.",
+        nrow(targets))
 
 # ----------------------------------------------------------------------------
 # 2. Read raw IDATs -> RGChannelSet
@@ -193,33 +248,40 @@ targets <- targets[keep_samples, ]
 # The 6 proportions are written as columns into pData(rgSet) so they propagate
 # through preprocessFunnorm into grSet's pheno and become model covariates
 # downstream (no re-read, no join needed).
-log_msg("Estimating blood cell-type proportions (Houseman / IDOL)...")
-cell_est <- estimateCellCounts2(
-  rgSet,
-  compositeCellType   = "Blood",
-  processMethod       = "preprocessNoob",
-  probeSelect         = "IDOL",
-  cellTypes           = c("CD8T", "CD4T", "NK", "Bcell", "Mono", "Neu"),
-  referencePlatform   = "IlluminaHumanMethylationEPIC",
-  IDOLOptimizedCpGs   = IDOLOptimizedCpGsBloodEPIC,
-  returnAll           = FALSE
-)
-cell_counts <- as.data.frame(cell_est$counts)      # samples x 6, rows = sample names
-cell_counts <- cell_counts[sampleNames(rgSet), , drop = FALSE]  # enforce order
+if (have_flowsorted) {
+  log_msg("Estimating blood cell-type proportions (Houseman / IDOL)...")
+  cell_est <- estimateCellCounts2(
+    rgSet,
+    compositeCellType   = "Blood",
+    processMethod       = "preprocessNoob",
+    probeSelect         = "IDOL",
+    cellTypes           = c("CD8T", "CD4T", "NK", "Bcell", "Mono", "Neu"),
+    referencePlatform   = "IlluminaHumanMethylationEPIC",
+    IDOLOptimizedCpGs   = IDOLOptimizedCpGsBloodEPIC,
+    returnAll           = FALSE
+  )
+  cell_counts <- as.data.frame(cell_est$counts)     # samples x 6, rows = sample names
+  cell_counts <- cell_counts[sampleNames(rgSet), , drop = FALSE]  # enforce order
 
-for (ct in colnames(cell_counts)) {
-  pData(rgSet)[[ct]] <- cell_counts[[ct]]
-  targets[[ct]]      <- cell_counts[[ct]]
+  for (ct in colnames(cell_counts)) {
+    pData(rgSet)[[ct]] <- cell_counts[[ct]]
+    targets[[ct]]      <- cell_counts[[ct]]
+  }
+  log_msg("  Cell proportions (mean): %s",
+          paste(sprintf("%s=%.3f", colnames(cell_counts),
+                        colMeans(cell_counts)), collapse = ", "))
+
+  # Cell-composition QC plot
+  pdf(file.path(cfg$qc_dir, "qc_cell_composition.pdf"), width = 10, height = 5)
+  boxplot(cell_counts, ylab = "Estimated proportion", las = 2,
+          main = "Houseman blood cell-type proportions", col = "grey80")
+  dev.off()
+} else {
+  log_msg("SKIPPING Houseman cell-type step: FlowSorted.Blood.EPIC not installed.")
+  log_msg("  -> pheno will lack CD8T/CD4T/NK/Bcell/Mono/Neu columns. Install the")
+  log_msg("     package and re-run for the full covariate set; 03's design")
+  log_msg("     self-adjusts to whichever covariates are present.")
 }
-log_msg("  Cell proportions (mean): %s",
-        paste(sprintf("%s=%.3f", colnames(cell_counts),
-                      colMeans(cell_counts)), collapse = ", "))
-
-# Cell-composition QC plot
-pdf(file.path(cfg$qc_dir, "qc_cell_composition.pdf"), width = 10, height = 5)
-boxplot(cell_counts, ylab = "Estimated proportion", las = 2,
-        main = "Houseman blood cell-type proportions", col = "grey80")
-dev.off()
 
 # ----------------------------------------------------------------------------
 # 6. Normalization -> GenomicRatioSet
