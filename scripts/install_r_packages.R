@@ -8,8 +8,11 @@ BiocManager::install(c(
   "minfi",
   "ChAMP",
   "limma",
+  "DMRcate",                       # differentially methylated region calling
   "IlluminaHumanMethylationEPICmanifest",
   "IlluminaHumanMethylationEPICanno.ilm10b4.hg19",
+  "FlowSorted.Blood.EPIC",         # Houseman cell-type deconvolution reference
+  "FlowSorted.CordBloodCombined.450k",  # dependency of FlowSorted.Blood.EPIC utils
   "sva",
   "clusterProfiler",
   "org.Hs.eg.db"
