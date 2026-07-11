@@ -51,8 +51,8 @@ cfg <- list(
   # --- inputs ---
   sample_sheet   = "data/raw/SampleSheet_V2.csv",              # methylation sheet (linkage)
   sample_info    = "data/raw/Gx_sample_info-21-06-15_v3.txt",  # expression sample metadata
-  expr_matrix    = "data/raw/Gx_expression_matrix.txt",        # CONFIRM: probe x sample values
-  probe_annot    = "data/raw/Gx_probe_annotation.txt",         # CONFIRM: DataDictionary sheet-2 table
+  expr_matrix    = "data/raw/Gx_expression_matrix.txt",        # CONFIRM: probe x sample values (STILL MISSING)
+  probe_annot    = "data/raw/Gx_probe_info-21-06-15_v3.txt",   # confirmed: 48106 probes x 42 cols
 
   out_dir        = "data/processed",
   qc_dir         = "results/qc",

@@ -2,6 +2,11 @@
 data/raw/*
 !data/raw/.gitkeep
 
+# Exception: curated analysis inputs (small, provenance-documented, portfolio-worthy)
+!data/raw/annotation/
+data/raw/annotation/*
+!data/raw/annotation/candidate_genes.txt
+
 # Large processed intermediate files
 data/processed/*.rds
 data/processed/*.RData

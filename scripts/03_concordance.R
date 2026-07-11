@@ -166,7 +166,9 @@ disc_cpgs <- union(
 )
 candidate_genes <- character(0)
 if (file.exists(cfg$candidate_genes_file)) {
-  candidate_genes <- unique(trimws(readLines(cfg$candidate_genes_file)))
+  raw <- readLines(cfg$candidate_genes_file)
+  raw <- sub("#.*$", "", raw)                    # strip full-line and inline comments
+  candidate_genes <- unique(trimws(raw))
   candidate_genes <- candidate_genes[candidate_genes != ""]
   log_msg("Candidate-gene list: %d genes.", length(candidate_genes))
 }

@@ -1,0 +1,48 @@
+# Candidate genes for the diet-methylation-expression concordance analysis.
+#
+# SOURCE: Klemp et al. 2022, Clinical and Translational Medicine (LIFE-Adult
+#   lifestyle-methylation study). Extracted directly from the paper PDF in
+#   data/raw/ -- Table 2 (top DMPs, p.6) and Table 3 (top DMRs, p.10).
+#
+# SCOPE: metabolic-focused subset. The 4 canonical smoking-methylation markers
+#   from the tables (AHRR, F2RL3, GFI1, RARA) were EXCLUDED -- the paper flags
+#   them as its strongest effects (p < 1e-11) and they are smoking- not diet-
+#   driven; our models already adjust for Smoking_score.
+#
+# CAVEAT: these are Klemp's LIFESTYLE-COMPOSITE (healthy vs unhealthy) hits, used
+#   here as an a-priori prior for a DietScore-specific question. They are NOT a
+#   diet-specific gene set. Treat the candidate arm as hypothesis-generating.
+#
+# NOTES: symbols are current HGNC symbols matching Gx_probe_info symbol_INGENUITY;
+#   all have >=1 expression probe. KIAA1026 (Table 2) resolved to KAZN via the
+#   synonyms_INGENUITY field. One symbol per line; blank lines, full-line and
+#   inline (#...) comments are ignored by 03_concordance.R.
+
+# --- Table 2: top differentially methylated positions (single-CpG hits) ---
+ANPEP        # cg06344992 / cg02008229 / cg23432008, chr15
+UNC13D       # cg07010633 / cg23891399, chr17
+SNED1        # cg26718213, chr2
+KAZN         # cg08538034, chr1  (Table 2 lists legacy alias KIAA1026)
+SLC4A4       # cg13530673, chr4
+PRSS23       # cg14391737, chr11
+GIPC1        # cg20742389, chr19
+VASH1        # cg10387007, chr14  (strongest DMP correlation with waist-hip ratio)
+
+# --- Table 3: top differentially methylated regions ---
+GFPT2        # chr5, strongest hypomethylated DMR (mean -6.9%)
+CACNA1D      # chr3
+CES1         # chr16
+BMP7         # chr20
+PALLD        # chr4
+DAB1         # chr1
+DOCK1        # chr10
+SLC17A9      # chr20
+RBMS3        # chr3
+ERICH1       # chr8, strongest hypermethylated DMR (mean +5.4%)
+LIPA         # chr10
+ZFP57        # chr6
+PAX8         # chr2  (DMR annotated to PAX8;PAX8-AS1)
+PAX8-AS1     # chr2, antisense to PAX8
+DUSP22       # chr6
+DNHD1        # chr11
+RRBP1        # chr20
