@@ -1,0 +1,17 @@
+Universe (tested CpGs) N=806845 ; discovery hits n=996 ; candidate genes=25
+
+===== CpG-LEVEL hypergeometric =====
+  candidate CpGs in universe K = 1631 (0.202% of 806845)
+  observed among hits k = 5 ; expected = 2.01 ; fold = 2.48x
+  P(X>=5) over-representation  = 0.0536
+  P(X<=5) under-representation = 0.983
+
+===== GENE-LEVEL hypergeometric =====
+  gene universe G = 26171 ; candidates present C = 25 of 25 (exact symbol)
+  candidates absent from array universe: (none)
+  hit genes = 765 ; candidate hit genes kk = 3 ; expected = 0.73 ; fold = 4.11x
+  P(X>=3) over-representation  = 0.0355
+  P(X<=3) under-representation = 0.994
+
+CAVEATS: n=36 underpowered -> ~807 of 996 hits expected under the null at p<1e-3;
+  small counts (kk=3, k=5); single un-corrected test -> treat as weak/borderline.
